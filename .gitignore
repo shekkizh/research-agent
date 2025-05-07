@@ -1,0 +1,15 @@
+.venv
+.cursor
+.env
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+# React
+node_modules
+
