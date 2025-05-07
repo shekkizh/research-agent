@@ -1,0 +1,202 @@
+classDiagram
+    class Orchestrator {
+        -agents: Dict[str, Agent]
+        -memoryManager: MemoryManager
+        -userProfileManager: UserProfileManager
+        +__init__(agents: Dict[str, Agent], memoryManager: MemoryManager, userProfileManager: UserProfileManager)
+        +process_request(userRequest: str): ResearchResponse
+        +delegate_task(task: Task, agent_type: str): AgentResponse
+        +collect_and_synthesize_results(responses: List[AgentResponse]): ResearchResponse
+        +update_user_profile(interaction: UserInteraction): bool
+    }
+
+    class Agent {
+        <<interface>>
+        +process(task: Task): AgentResponse
+        +can_handle(task: Task): bool
+    }
+
+    class DocumentAgent {
+        +documentProcessor: DocumentProcessor
+        +__init__(documentProcessor: DocumentProcessor)
+        +process(task: Task): AgentResponse
+        +can_handle(task: Task): bool
+        +summarize_document(document: Document): Summary
+    }
+
+    class WebSearchAgent {
+        +webSearcher: WebSearcher
+        +__init__(webSearcher: WebSearcher)
+        +process(task: Task): AgentResponse
+        +can_handle(task: Task): bool
+        +search_web(query: str): List[SearchResult]
+    }
+
+    class LinkTrackingAgent {
+        +linkTracker: LinkTracker
+        +__init__(linkTracker: LinkTracker)
+        +process(task: Task): AgentResponse
+        +can_handle(task: Task): bool
+        +track_link_click(link: str, context: str): None
+        +analyze_link_preferences(): LinkPreferences
+    }
+
+    class CodeSearchAgent {
+        +codeSearcher: CodeSearcher
+        +__init__(codeSearcher: CodeSearcher)
+        +process(task: Task): AgentResponse
+        +can_handle(task: Task): bool
+        +search_code(query: str, language: str): List[CodeSnippet]
+    }
+
+    class SelfReflectionAgent {
+        +memoryManager: MemoryManager
+        +__init__(memoryManager: MemoryManager)
+        +process(task: Task): AgentResponse
+        +can_handle(task: Task): bool
+        +reflect_on_session(sessionData: SessionData): ReflectionSummary
+        +update_user_model(reflection: ReflectionSummary): None
+    }
+
+    class MemoryManager {
+        -vectorStore: VectorDatabase
+        -sqlStore: SQLDatabase
+        +__init__(vectorStore: VectorDatabase, sqlStore: SQLDatabase)
+        +store_research_item(item: ResearchItem): str
+        +retrieve_similar_items(query: str, limit: int): List[ResearchItem]
+        +store_user_interaction(interaction: UserInteraction): bool
+        +get_user_history(userId: str, limit: int): List[UserInteraction]
+        +update_memory_with_reflection(reflection: ReflectionSummary): None
+    }
+
+    class UserProfileManager {
+        -profiles: Dict[str, UserProfile]
+        -memoryManager: MemoryManager
+        +__init__(memoryManager: MemoryManager)
+        +get_profile(userId: str): UserProfile
+        +update_profile(userId: str, updates: Dict): bool
+        +create_profile(userId: str, initialData: Dict): UserProfile
+        +analyze_research_style(userId: str): ResearchStyleAnalysis
+    }
+
+    class VectorDatabase {
+        -connectionString: str
+        +__init__(connectionString: str)
+        +store_vector(id: str, vector: List[float], metadata: Dict): bool
+        +search_similar(vector: List[float], limit: int): List[Dict]
+        +delete_vector(id: str): bool
+        +update_vector(id: str, vector: List[float], metadata: Dict): bool
+    }
+
+    class SQLDatabase {
+        -connectionString: str
+        +__init__(connectionString: str)
+        +execute_query(query: str, params: Dict): Any
+        +store_structured_data(table: str, data: Dict): str
+        +retrieve_data(table: str, conditions: Dict, limit: int): List[Dict]
+        +update_data(table: str, id: str, updates: Dict): bool
+    }
+
+    class UserProfile {
+        -userId: str
+        -preferences: Dict
+        -researchStyle: ResearchStyle
+        -interests: List[str]
+        -skillLevel: Dict[str, int]
+        +__init__(userId: str)
+        +update_preferences(preferences: Dict): None
+        +add_interest(interest: str): None
+        +remove_interest(interest: str): None
+        +update_research_style(style: ResearchStyle): None
+        +update_skill_level(domain: str, level: int): None
+    }
+
+    class ResearchSession {
+        -sessionId: str
+        -userId: str
+        -startTime: datetime
+        -endTime: datetime
+        -interactions: List[UserInteraction]
+        -topics: List[str]
+        +__init__(userId: str)
+        +add_interaction(interaction: UserInteraction): None
+        +end_session(): None
+        +get_session_duration(): int
+        +get_main_topics(): List[str]
+    }
+
+    class UserInteraction {
+        -interactionId: str
+        -userId: str
+        -timestamp: datetime
+        -type: str
+        -content: Any
+        -context: Dict
+        +__init__(userId: str, type: str, content: Any)
+        +add_context(key: str, value: Any): None
+        +get_context(): Dict
+    }
+
+    class Task {
+        -taskId: str
+        -type: str
+        -parameters: Dict
+        -priority: int
+        -createdAt: datetime
+        +__init__(type: str, parameters: Dict)
+        +set_priority(priority: int): None
+        +get_parameters(): Dict
+    }
+
+    class AgentResponse {
+        -responseId: str
+        -agentType: str
+        -content: Any
+        -metadata: Dict
+        -confidence: float
+        +__init__(agentType: str, content: Any)
+        +add_metadata(key: str, value: Any): None
+        +set_confidence(confidence: float): None
+    }
+
+    class ResearchResponse {
+        -responseId: str
+        -content: Any
+        -sources: List[Source]
+        -relatedTopics: List[str]
+        -nextSteps: List[str]
+        +__init__(content: Any)
+        +add_source(source: Source): None
+        +add_related_topic(topic: str): None
+        +suggest_next_step(step: str): None
+    }
+
+    %% Relationships
+    Orchestrator o-- Agent : coordinates
+    Orchestrator --> MemoryManager : uses
+    Orchestrator --> UserProfileManager : uses
+    
+    Agent <|-- DocumentAgent : implements
+    Agent <|-- WebSearchAgent : implements
+    Agent <|-- LinkTrackingAgent : implements
+    Agent <|-- CodeSearchAgent : implements
+    Agent <|-- SelfReflectionAgent : implements
+    
+    DocumentAgent --> MemoryManager : uses
+    WebSearchAgent --> MemoryManager : uses
+    LinkTrackingAgent --> MemoryManager : uses
+    CodeSearchAgent --> MemoryManager : uses
+    SelfReflectionAgent --> MemoryManager : uses
+    
+    MemoryManager --> VectorDatabase : uses
+    MemoryManager --> SQLDatabase : uses
+    
+    UserProfileManager --> MemoryManager : uses
+    UserProfileManager o-- UserProfile : manages
+    
+    UserProfile -- ResearchSession : associated with
+    ResearchSession o-- UserInteraction : contains
+    
+    Orchestrator ..> Task : creates
+    Agent ..> AgentResponse : produces
+    Orchestrator ..> ResearchResponse : produces
