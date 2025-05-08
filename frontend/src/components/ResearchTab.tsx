@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import MarkdownReport from './MarkdownReport';
+import { saveReport } from '@/utils/storage';
+import { ReportHistory } from '@/app/page';
 
 interface ProgressItem {
   message: string;
@@ -15,6 +17,7 @@ interface ProgressItem {
 
 interface ResearchTabProps {
   tabId: string;
+  initialReport?: ReportHistory;
 }
 
 interface WebSocketMessage {
@@ -26,12 +29,22 @@ interface WebSocketMessage {
   report?: string;
 }
 
-const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
-  const [query, setQuery] = useState<string>('');
-  const [status, setStatus] = useState<'idle' | 'processing' | 'complete' | 'error'>('idle');
+const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
+  const [query, setQuery] = useState<string>(initialReport?.query || '');
+  const [status, setStatus] = useState<'idle' | 'processing' | 'complete' | 'error'>(initialReport ? 'complete' : 'idle');
   const [progress, setProgress] = useState<ProgressItem[]>([]);
-  const [report, setReport] = useState<string>('');
+  const [report, setReport] = useState<string>(initialReport?.report || '');
+  const [title, setTitle] = useState<string>('');
   const wsRef = useRef<WebSocket | null>(null);
+  
+  // Initialize from history if provided
+  useEffect(() => {
+    if (initialReport) {
+      setQuery(initialReport.query);
+      setReport(initialReport.report);
+      setStatus('complete');
+    }
+  }, [initialReport]);
   
   // Close WebSocket on unmount
   useEffect(() => {
@@ -131,6 +144,21 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
     else if (data.type === 'complete' && data.report) {
       setStatus('complete');
       setReport(data.report);
+      
+      // Extract a title from the report (first h1 title)
+      const titleMatch = data.report.match(/^# (.+)$/m);
+      const extractedTitle = titleMatch ? titleMatch[1] : `Research ${new Date().toLocaleString()}`;
+      setTitle(extractedTitle);
+      
+      // Save to history
+      const historyItem: ReportHistory = {
+        id: `${Date.now()}`,
+        title: extractedTitle,
+        query: query,
+        report: data.report,
+        timestamp: Date.now()
+      };
+      saveReport(historyItem);
     }
   };
 
