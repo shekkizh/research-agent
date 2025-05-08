@@ -12,7 +12,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<string>('1');
 
   const addNewTab = () => {
-    const newId = String(Date.now());
+    const newId = (tabs.length + 1).toString();
     setTabs([...tabs, { id: newId, query: '', status: 'idle' }]);
     setActiveTab(newId);
   };

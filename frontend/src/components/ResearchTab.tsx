@@ -32,7 +32,7 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
     setProgress([{ message: 'Starting research...', done: false }]);
     
     try {
-      const response = await fetch('/api/research', {
+      await fetch('/api/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: query, session_id: tabId }),
