@@ -117,7 +117,7 @@ export default function Home() {
         tab.report.title.substring(0, 15) + '...' : 
         tab.report.title;
     }
-    return 'New Research';
+    return 'Research';
   };
 
   return (
