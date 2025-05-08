@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import MarkdownReport from './MarkdownReport';
 
 interface ProgressItem {
   message: string;
@@ -211,18 +211,7 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
         </Card>
       )}
       
-      {report && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Research Report</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="prose dark:prose-invert max-w-none">
-              <ReactMarkdown>{report}</ReactMarkdown>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {report && <MarkdownReport markdown={report} />}
     </div>
   );
 };
