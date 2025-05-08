@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ChevronDown, ChevronUp, Download, Copy, CopyCheck, ClipboardCopy, ClipboardCheck } from 'lucide-react';
+import { ChevronDown, ChevronUp, Download, ClipboardCopy, ClipboardCheck } from 'lucide-react';
 interface MarkdownReportProps {
   markdown: string;
 }
@@ -10,7 +10,6 @@ interface MarkdownReportProps {
 const MarkdownReport: React.FC<MarkdownReportProps> = ({ markdown }) => {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
-  const [copyAllClicked, setCopyAllClicked] = useState(false);
 
   // Split the markdown into sections based on heading level 1 (#)
   const sections = React.useMemo(() => {
@@ -34,15 +33,8 @@ const MarkdownReport: React.FC<MarkdownReportProps> = ({ markdown }) => {
   const copyToClipboard = (text: string, sectionTitle?: string) => {
     if (sectionTitle) {
       setCopiedSection(sectionTitle);
-      setCopyAllClicked(false);
       setTimeout(() => {
         setCopiedSection(null);
-      }, 2000);
-    } else {
-      // For the "Copy All" button
-      setCopyAllClicked(true);
-      setTimeout(() => {
-        setCopyAllClicked(false);
       }, 2000);
     }
 
@@ -53,7 +45,7 @@ const MarkdownReport: React.FC<MarkdownReportProps> = ({ markdown }) => {
 
   const getSectionTitle = (section: string) => {
     const match = section.match(/^# (.+)$/m);
-    return match ? match[1] : 'Section';
+    return match ? match[1] : 'Report';
   };
 
   const toggleSection = (sectionTitle: string) => {
@@ -73,45 +65,24 @@ const MarkdownReport: React.FC<MarkdownReportProps> = ({ markdown }) => {
   }, [markdown]);
 
   return (
-    <Card className="w-full">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Research Report</CardTitle>
-        <div className="flex space-x-2">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => copyToClipboard(markdown)}
-          >
-            {copyAllClicked ? <CopyCheck className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
-            Copy All
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => downloadReport(getSectionTitle(sections[0]))}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Download
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
+      <CardContent className="p-0">
         <div className="space-y-4">
           {sections.map((section, index) => {
             const sectionTitle = getSectionTitle(section);
+            const sectionContent = section.replace(/^# (.+)$/m, '');
             const isExpanded = expandedSections[sectionTitle];
             const isCopied = copiedSection === sectionTitle;
             
             return (
-              <Card key={index} className="border-2">
+              <Card key={index}>
                 <CardHeader className="p-4 cursor-pointer flex flex-row justify-between items-center">
                   <div className="flex-grow" onClick={() => toggleSection(sectionTitle)}>
                     <CardTitle className="text-lg">{sectionTitle}</CardTitle>
                   </div>
-                  <div className="flex space-x-2">
+                  <div className="flex">
                     <Button 
                       variant="ghost" 
-                      size="sm" 
+                      size="icon" 
                       onClick={(e) => {
                         copyToClipboard(section, sectionTitle);
                       }}
@@ -120,7 +91,15 @@ const MarkdownReport: React.FC<MarkdownReportProps> = ({ markdown }) => {
                     </Button>
                     <Button 
                       variant="ghost" 
-                      size="sm"
+                      size="icon" 
+                      onClick={() => downloadReport(sectionTitle)}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon"
                       onClick={() => toggleSection(sectionTitle)}
                     >
                       <span className="transition-transform duration-200">
@@ -132,7 +111,7 @@ const MarkdownReport: React.FC<MarkdownReportProps> = ({ markdown }) => {
                 {isExpanded && (
                   <CardContent className="p-4 border-t">
                     <div className="prose dark:prose-invert max-w-none">
-                      <ReactMarkdown>{section}</ReactMarkdown>
+                      <ReactMarkdown>{sectionContent}</ReactMarkdown>
                     </div>
                   </CardContent>
                 )}
@@ -141,7 +120,6 @@ const MarkdownReport: React.FC<MarkdownReportProps> = ({ markdown }) => {
           })}
         </div>
       </CardContent>
-    </Card>
   );
 };
 

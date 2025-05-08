@@ -5,7 +5,6 @@ import inspect
 from rich.console import Console, Group
 from rich.live import Live
 from rich.spinner import Spinner
-from rich.panel import Panel
 from rich.tree import Tree
 
 
