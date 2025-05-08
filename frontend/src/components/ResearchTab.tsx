@@ -1,5 +1,11 @@
-import React, { useState } from 'react';
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ProgressItem {
   message: string;
@@ -25,6 +31,16 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
   const [status, setStatus] = useState<'idle' | 'processing' | 'complete' | 'error'>('idle');
   const [progress, setProgress] = useState<ProgressItem[]>([]);
   const [report, setReport] = useState<string>('');
+  const wsRef = useRef<WebSocket | null>(null);
+  
+  // Close WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
   
   const submitQuery = async () => {
     if (!query.trim()) return;
@@ -33,19 +49,49 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
     setProgress([{ message: 'Starting research...', done: false }]);
     
     try {
-      await fetch('/api/research', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: query, session_id: tabId }),
-      });
+      // Close any existing WebSocket connection
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
       
-      // Connect to WebSocket for progress updates
-      const ws = new WebSocket(`ws://${window.location.host}/ws/${tabId}`);
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data) as WebSocketMessage;
-        if (data.session_id === tabId) {
-          updateProgress(data);
+      // Connect directly to the backend WebSocket
+      const backendWsUrl = `ws://localhost:8000/ws/${tabId}`;
+      const ws = new WebSocket(backendWsUrl);
+      wsRef.current = ws;
+      
+      ws.onopen = async () => {
+        console.log('WebSocket connected, sending research request');
+        // Make the API request after WebSocket is connected
+        try {
+          await fetch('/api/research', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: query, session_id: tabId }),
+          });
+        } catch (error) {
+          console.error('API request error:', error);
+          setStatus('error');
         }
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as WebSocketMessage;
+          if (data.session_id === tabId) {
+            updateProgress(data);
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error, event.data);
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setStatus('error');
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket closed');
       };
     } catch (error) {
       console.error('Error:', error);
@@ -54,6 +100,7 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
   };
   
   const updateProgress = (data: WebSocketMessage) => {
+    console.log('Received update:', data);
     if (data.type === 'progress' && data.message) {
       if (data.item) {
         setProgress(prev => {
@@ -86,57 +133,95 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
       setReport(data.report);
     }
   };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitQuery();
+    }
+  };
   
   return (
-    <div>
-      <div className="mb-4">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="What would you like to research?"
-          className="w-full p-2 border rounded"
-          disabled={status === 'processing'}
-        />
-        <button
-          onClick={submitQuery}
-          disabled={status === 'processing' || !query.trim()}
-          className="mt-2 px-4 py-2 bg-blue-500 text-white rounded disabled:bg-gray-300"
-        >
-          {status === 'processing' ? 'Processing...' : 'Research'}
-        </button>
+    <div className="space-y-6">
+      <div className="flex items-center space-x-2">
+        <div className="relative flex-1">
+          <Input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyPress}
+            placeholder="What would you like to research?"
+            disabled={status === 'processing'}
+            className="pr-10"
+          />
+          <Button
+            onClick={submitQuery}
+            disabled={status === 'processing' || !query.trim()}
+            variant="ghost"
+            size="icon"
+            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+            aria-label="Send"
+          >
+            {status === 'processing' ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : (
+              <svg 
+                width="15" 
+                height="15" 
+                viewBox="0 0 15 15" 
+                fill="none" 
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path 
+                  d="M1.20308 1.04312C1.00481 0.954998 0.772341 1.0048 0.627577 1.16641C0.482813 1.32802 0.458794 1.56455 0.568117 1.75196L3.92115 7.50002L0.568117 13.2481C0.458794 13.4355 0.482813 13.672 0.627577 13.8336C0.772341 13.9952 1.00481 14.045 1.20308 13.9569L14.7031 7.95693C14.8836 7.87668 15 7.69762 15 7.50002C15 7.30243 14.8836 7.12337 14.7031 7.04312L1.20308 1.04312ZM4.84553 7.10002L2.21234 2.586L13.2689 7.50002L2.21234 12.414L4.84552 7.90002H9C9.22092 7.90002 9.4 7.72094 9.4 7.50002C9.4 7.27911 9.22092 7.10002 9 7.10002H4.84553Z" 
+                  fill="currentColor" 
+                  fillRule="evenodd" 
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
+          </Button>
+        </div>
       </div>
       
       {status !== 'idle' && (
-        <div className="mt-4">
-          <h3 className="text-lg font-bold">Progress</h3>
-          <div className="mt-2 border rounded p-3 bg-gray-50">
-            {progress.map((item, index) => (
-              <div key={index} className="mb-2 border-b pb-2 last:border-b-0">
-                <div className="flex items-center">
-                  <span className="mr-2">{item.done ? '✅' : '🔄'}</span>
-                  <div>
-                    {item.item && (
-                      <span className="text-sm text-gray-600 mr-2">
-                        [{item.item}]
-                      </span>
-                    )}
-                    <span className="font-medium">{item.message}</span>
+        <Card>
+          <CardHeader>
+            <CardTitle>Progress</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[200px]">
+              {progress.map((item, index) => (
+                <div key={index} className="mb-3 pb-3 border-b last:border-b-0 last:pb-0">
+                  <div className="flex items-start">
+                    <span className="mr-2 mt-0.5">{item.done ? '✅' : '🔄'}</span>
+                    <div>
+                      {item.item && (
+                        <span className="text-sm text-muted-foreground mr-2">
+                          [{item.item}]
+                        </span>
+                      )}
+                      <span>{item.message}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
+              ))}
+            </ScrollArea>
+          </CardContent>
+        </Card>
       )}
       
       {report && (
-        <div className="mt-4">
-          <h3 className="text-lg font-bold">Research Report</h3>
-          <div className="p-4 border rounded bg-gray-50">
-            <ReactMarkdown>{report}</ReactMarkdown>
-          </div>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Research Report</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="prose dark:prose-invert max-w-none">
+              <ReactMarkdown>{report}</ReactMarkdown>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
