@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 interface ProgressItem {
   message: string;
   done: boolean;
+  item?: string;
 }
 
 interface ResearchTabProps {
@@ -54,7 +55,31 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
   
   const updateProgress = (data: WebSocketMessage) => {
     if (data.type === 'progress' && data.message) {
-      setProgress(prev => [...prev, { message: data.message!, done: data.is_done || false }]);
+      if (data.item) {
+        setProgress(prev => {
+          const existingItemIndex = prev.findIndex(p => p.item === data.item);
+          if (existingItemIndex >= 0) {
+            const updated = [...prev];
+            updated[existingItemIndex] = { 
+              message: data.message!,
+              done: data.is_done || false,
+              item: data.item
+            };
+            return updated;
+          } else {
+            return [...prev, { 
+              message: data.message!,
+              done: data.is_done || false,
+              item: data.item
+            }];
+          }
+        });
+      } else {
+        setProgress(prev => [...prev, { 
+          message: data.message!,
+          done: data.is_done || false
+        }]);
+      }
     }
     else if (data.type === 'complete' && data.report) {
       setStatus('complete');
@@ -85,13 +110,23 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId }) => {
       {status !== 'idle' && (
         <div className="mt-4">
           <h3 className="text-lg font-bold">Progress</h3>
-          <ul className="mt-2">
+          <div className="mt-2 border rounded p-3 bg-gray-50">
             {progress.map((item, index) => (
-              <li key={index} className="flex items-center">
-                {item.done ? '✓' : '⟳'} {item.message}
-              </li>
+              <div key={index} className="mb-2 border-b pb-2 last:border-b-0">
+                <div className="flex items-center">
+                  <span className="mr-2">{item.done ? '✅' : '🔄'}</span>
+                  <div>
+                    {item.item && (
+                      <span className="text-sm text-gray-600 mr-2">
+                        [{item.item}]
+                      </span>
+                    )}
+                    <span className="font-medium">{item.message}</span>
+                  </div>
+                </div>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
       

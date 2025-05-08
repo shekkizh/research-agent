@@ -58,23 +58,39 @@ class ResearchManager:
             planner_agent,
             f"Query: {query}",
         )
+        search_count = len(result.final_output.searches)
         self.printer.update_item(
             "planning",
-            f"Will perform {len(result.final_output.searches)} searches",
+            f"Will perform {search_count} searches",
             is_done=True,
         )
+        
+        # Add details about each planned search
+        for i, search_item in enumerate(result.final_output.searches):
+            self.printer.update_item(
+                f"search_plan_{i+1}",
+                f"Search {i+1}: {search_item.query} - {search_item.reason}",
+                is_done=True,
+                hide_checkmark=True,
+            )
+            
         return result.final_output_as(WebSearchPlan)
 
     async def _perform_searches(self, search_plan: WebSearchPlan) -> list[str]:
         with custom_span("Search the web"):
             self.printer.update_item("searching", "Searching...")
             num_completed = 0
-            tasks = [asyncio.create_task(self._search(item)) for item in search_plan.searches]
+            tasks = [asyncio.create_task(self._search(item, idx)) for idx, item in enumerate(search_plan.searches)]
             results = []
             for task in asyncio.as_completed(tasks):
-                result = await task
+                result, idx = await task
                 if result is not None:
                     results.append(result)
+                    self.printer.update_item(
+                        f"search_result_{idx+1}",
+                        f"Got results for: {search_plan.searches[idx].query}",
+                        is_done=True,
+                    )
                 num_completed += 1
                 self.printer.update_item(
                     "searching", f"Searching... {num_completed}/{len(tasks)} completed"
@@ -82,16 +98,32 @@ class ResearchManager:
             self.printer.mark_item_done("searching")
             return results
 
-    async def _search(self, item: WebSearchItem) -> str | None:
+    async def _search(self, item: WebSearchItem, idx: int) -> tuple[str | None, int]:
+        search_id = f"search_{idx+1}"
+        self.printer.update_item(
+            search_id, 
+            f"Searching: {item.query}",
+        )
+        
         input = f"Search term: {item.query}\nReason for searching: {item.reason}"
         try:
             result = await Runner.run(
                 search_agent,
                 input,
             )
-            return str(result.final_output)
-        except Exception:
-            return None
+            self.printer.update_item(
+                search_id,
+                f"Completed search: {item.query}",
+                is_done=True,
+            )
+            return str(result.final_output), idx
+        except Exception as e:
+            self.printer.update_item(
+                search_id,
+                f"Search failed: {item.query} - {str(e)}",
+                is_done=True,
+            )
+            return None, idx
 
     async def _write_report(self, query: str, search_results: list[str]) -> ReportData:
         self.printer.update_item("writing", "Thinking about report...")
@@ -112,11 +144,30 @@ class ResearchManager:
 
         last_update = time.time()
         next_message = 0
-        async for _ in result.stream_events():
+        async for chunk in result.stream_events():
             if time.time() - last_update > 5 and next_message < len(update_messages):
                 self.printer.update_item("writing", update_messages[next_message])
                 next_message += 1
                 last_update = time.time()
+                
+            # If we have a chunk with new content, update the UI
+            if hasattr(chunk, 'delta') and chunk.delta and hasattr(chunk.delta, 'content') and chunk.delta.content:
+                self.printer.update_item(
+                    "writing_progress",
+                    f"Writing in progress... ({len(chunk.delta.content)} new chars)",
+                    hide_checkmark=True,
+                )
 
         self.printer.mark_item_done("writing")
-        return result.final_output_as(ReportData)
+        
+        # Add follow-up questions as separate items
+        report_data = result.final_output_as(ReportData)
+        for i, question in enumerate(report_data.follow_up_questions):
+            self.printer.update_item(
+                f"follow_up_{i+1}",
+                f"Follow-up question: {question}",
+                is_done=True,
+                hide_checkmark=True,
+            )
+            
+        return report_data
