@@ -1,4 +1,6 @@
 from typing import Any, Dict, Optional, Callable
+import asyncio
+import inspect
 
 from rich.console import Console, Group
 from rich.live import Live
@@ -29,7 +31,10 @@ class Printer:
     ) -> None:
         # Call the callback if provided
         if self.callback:
-            self.callback(key, message, is_done)
+            callback_result = self.callback(key, message, is_done)
+            # Handle coroutine by creating a task to run it
+            if inspect.iscoroutine(callback_result):
+                asyncio.create_task(callback_result)
             
         # If the item already exists, update it
         if key in self.items:
@@ -59,7 +64,10 @@ class Printer:
             
         # Call the callback if provided
         if self.callback:
-            self.callback(key, self.items[key].label, True)
+            callback_result = self.callback(key, self.items[key].label, True)
+            # Handle coroutine by creating a task to run it
+            if inspect.iscoroutine(callback_result):
+                asyncio.create_task(callback_result)
 
     def flush(self) -> None:
         renderables: list[Any] = []
