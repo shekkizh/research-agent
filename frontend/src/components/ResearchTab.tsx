@@ -24,7 +24,7 @@ interface ResearchTabProps {
 
 interface WebSocketMessage {
   session_id: string;
-  type: 'progress' | 'complete';
+  type: 'progress' | 'complete' | 'clarification_request';
   item?: string;
   message?: string;
   is_done?: boolean;
@@ -39,6 +39,11 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
   const [title, setTitle] = useState<string>('');
   const [isProgressOpen, setIsProgressOpen] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
+  
+  // Add new state for clarification UI
+  const [showClarification, setShowClarification] = useState<boolean>(false);
+  const [clarificationQuestion, setClarificationQuestion] = useState<string>('');
+  const [clarificationResponse, setClarificationResponse] = useState<string>('');
   
   // Initialize from history if provided
   useEffect(() => {
@@ -94,7 +99,12 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
         try {
           const data = JSON.parse(event.data) as WebSocketMessage;
           if (data.session_id === tabId) {
-            updateProgress(data);
+            if (data.type === 'clarification_request') {
+              // Handle clarification request
+              handleClarificationRequest(data.message || 'Can you provide more information?');
+            } else {
+              updateProgress(data);
+            }
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error, event.data);
@@ -112,6 +122,45 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
     } catch (error) {
       console.error('Error:', error);
       setStatus('error');
+    }
+  };
+  
+  const handleClarificationRequest = (question: string) => {
+    // Show the clarification UI
+    setClarificationQuestion(question);
+    setShowClarification(true);
+    // Automatically expand the progress panel to show the clarification request
+    setIsProgressOpen(true);
+    
+    // Add to progress
+    setProgress(prev => [...prev, { 
+      message: `Agent is asking: ${question}`,
+      done: false,
+      item: 'clarification_request'
+    }]);
+  };
+  
+  const submitClarification = () => {
+    if (!clarificationResponse.trim()) return;
+    
+    // Send the clarification response via WebSocket
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'clarification_response',
+        session_id: tabId,
+        text: clarificationResponse
+      }));
+      
+      // Add to progress
+      setProgress(prev => [...prev, { 
+        message: `Your response: ${clarificationResponse}`,
+        done: true,
+        item: 'clarification_response'
+      }]);
+      
+      // Reset clarification UI
+      setShowClarification(false);
+      setClarificationResponse('');
     }
   };
   
@@ -172,6 +221,13 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
     }
   };
   
+  const handleClarificationKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitClarification();
+    }
+  };
+  
   return (
     <div className="space-y-6">
       <div className="flex items-center space-x-2">
@@ -229,6 +285,32 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
                       </div>
                     </div>
                   ))}
+                  
+                  {/* Clarification input section */}
+                  {showClarification && (
+                    <div className="mt-4 border-t pt-4">
+                      <div className="mb-2 font-medium text-primary">
+                        {clarificationQuestion}
+                      </div>
+                      <div className="flex space-x-2">
+                        <Input
+                          type="text"
+                          value={clarificationResponse}
+                          onChange={(e) => setClarificationResponse(e.target.value)}
+                          onKeyDown={handleClarificationKeyPress}
+                          placeholder="Type your response..."
+                          className="flex-1"
+                        />
+                        <Button 
+                          onClick={submitClarification}
+                          disabled={!clarificationResponse.trim()}
+                          size="sm"
+                        >
+                          Send
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </ScrollArea>
               </CardContent>
             </CollapsibleContent>
