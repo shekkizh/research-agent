@@ -216,7 +216,7 @@ class ResearchManager:
         print(f"Follow up questions: {follow_up_questions}")
         
         # Run a reflection agent to learn from this session
-        self._reflect_on_session(query, report, conversation_history)
+        await self._reflect_on_session(query, report, conversation_history)
         
         return report
     
