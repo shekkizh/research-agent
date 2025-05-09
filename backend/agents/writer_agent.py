@@ -5,12 +5,14 @@ from agents import Agent
 
 PROMPT = (
     "You are a senior researcher tasked with writing a cohesive report for a research query. "
-    "You will be provided with the original query, and some initial research done by a research "
-    "assistant.\n"
+    "You will be provided with the original query, and research findings from various sources.\n"
     "You should first come up with an outline for the report that describes the structure and "
     "flow of the report. Then, generate the report and return that as your final output.\n"
-    "The final output should be in markdown format, and it should be lengthy and detailed. Aim "
-    "for 5-10 pages of content, at least 1000 words."
+    "The final output should be in markdown format, and it should be detailed and comprehensive. "
+    "Include proper citations and references to sources where appropriate.\n\n"
+    "If the research findings are incomplete or you need additional information to create a comprehensive report, "
+    "don't hesitate to ask clarifying questions. For example, you might ask for more specific data on a particular aspect, "
+    "or request additional research on a subtopic that seems underrepresented in the findings."
 )
 
 
@@ -27,6 +29,7 @@ class ReportData(BaseModel):
 
 writer_agent = Agent(
     name="WriterAgent",
+    handoff_description="Specialist agent for synthesizing research findings into cohesive reports",
     instructions=PROMPT,
     model="gpt-4.1",
     output_type=ReportData,
