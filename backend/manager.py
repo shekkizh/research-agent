@@ -20,7 +20,7 @@ from backend.agents.document_agent import document_agent
 from backend.agents.code_agent import code_agent
 from backend.agents.reflection_agent import reflection_agent, ReflectionSummary
 from backend.agents.orchestrator_agent import orchestrator_agent
-from backend.agents.base_agent import BaseAgentResponse, ClarificationRequest
+from backend.agents import AgentResponse
 from backend.printer import Printer
 
 class ResearchManager:
@@ -84,90 +84,108 @@ class ResearchManager:
             
             # Track the conversation for interactive clarifications
             conversation_history = inputs.copy()
-            current_agent = orchestrator_agent
             
             # Continue the conversation until we get a final report
             report = None
             while report is None:
                 # Stream the agent process
                 result = await Runner.run(
-                    current_agent,
+                    orchestrator_agent,
                     input=conversation_history,
                 )
                 
-                
                 # Log full agent response to console for debugging
-                self.console.print(f"\n[dim blue]===== {current_agent.name} RESPONSE =====\n{result}\n==================================[/dim blue]")
+                self.console.print(f"\n[dim blue]===== RESPONSE =====\n{result}\n==================================[/dim blue]")
                 
                 # Check if the agent is asking for clarification
-                if hasattr(result.final_output, 'clarification_request') and hasattr(result.final_output.clarification_request, 'questions'):
+                if result.last_agent == orchestrator_agent:
                     try:
-                        agent_response = result.final_output_as(BaseAgentResponse)
-                        questions = agent_response.clarification_request.questions
-                        context = agent_response.clarification_request.context
+                        agent_response = result.final_output_as(AgentResponse)
                         
-                        if questions:
-                            # Format the questions and context for UI display
-                            formatted_parts = []
-                            if context:
-                                formatted_parts.append(f"Context: {context}")
- 
-                            formatted_parts.append("Questions:")
-                            for i, question in enumerate(questions, 1):
-                                formatted_parts.append(f"{i}. {question}")
+                        # Check if we have a clarification request
+                        if hasattr(agent_response, 'clarification_request') and agent_response.clarification_request:
+                            questions = agent_response.clarification_request.questions
+                            context = agent_response.clarification_request.context
                             
-                            formatted_question = "\n".join(formatted_parts)
+                            if questions:
+                                # Format the questions and context for UI display
+                                formatted_parts = []
+                                if context:
+                                    formatted_parts.append(f"Context: {context}")
+     
+                                formatted_parts.append("Questions:")
+                                for i, question in enumerate(questions, 1):
+                                    formatted_parts.append(f"{i}. {question}")
+                                
+                                formatted_question = "\n".join(formatted_parts)
+                                
+                                self.printer.update_item(
+                                    "clarification",
+                                    "Waiting for user clarification...",
+                                    is_done=False,
+                                )
+                                
+                                # Get user input via WebSocket if session_id is available, otherwise fallback to console
+                                if self.session_id:
+                                    # Import here to avoid circular imports
+                                    from api import request_clarification
+                                    user_input = await request_clarification(self.session_id, formatted_question)
+                                else:
+                                    user_input = input("\nProvide clarification: ")
+                                
+                                self.printer.update_item(
+                                    "clarification", 
+                                    "Received user clarification",
+                                    is_done=True
+                                )
+                                
+                                self.printer.update_item(
+                                    "user_response",
+                                    f"User provided clarification: {user_input}",
+                                    is_done=True,
+                                    hide_checkmark=True,
+                                )
+                                
+                                # Add to conversation history - use string representation to avoid JSON issues
+                                conversation_history.append({"role": "assistant", "content": f"I need clarification: {formatted_question}"})
+                                conversation_history.append({"role": "user", "content": user_input})
+                                
+                                # Continue the loop - don't return agent_response
+                                continue
                     except Exception as e:
                         self.console.log(f"Error parsing agent response: {e}")
-                        formatted_question = str(agent_response) # fallback to string representation of agent response
-                    
-                    # Get user input via WebSocket if session_id is available, otherwise fallback to console
-                    if self.session_id:
-                        # Import here to avoid circular imports
-                        from api import request_clarification
-                        user_input = await request_clarification(self.session_id, formatted_question)
-                    else:
-                        user_input = input("\nProvide clarification: ")
-                    
+                        # Continue with default flow
+
+                # Check if we've completed the task or need to continue with handoff
+                elif hasattr(result.final_output, 'report'):
+                    # If the output is already a report
+                    report = result.final_output_as(ReportData)
                     self.printer.update_item(
-                        "user_response",
-                        f"User provided clarification: {user_input}",
+                        "report_generated",
+                        "Report has been generated",
                         is_done=True,
-                        hide_checkmark=True,
                     )
-                    
-                    # Add to conversation history
-                    conversation_history.append({"role": "assistant", "content": agent_response})
-                    conversation_history.append({"role": "user", "content": user_input})
-
                 else:
-                    # Check if we've completed the task or need to continue with handoff
-                    if hasattr(result.final_output, 'report'):
-                        # If the output is already a report
-                        report = result.final_output_as(ReportData)
-                        self.printer.update_item(
-                            "report_generated",
-                            "Report has been generated",
-                            is_done=True,
-                        )
-                    elif result.current_agent != current_agent:
-                        # If we have a handoff, update the current agent
-                        self.printer.update_item(
-                            "clarification_requested",
-                            f"Clarification requested from {result.current_agent.name}",
-                            is_done=True,
-                        )
-                        current_agent = result.current_agent
-                    else:
-                        self.printer.update_item(
-                            "agent processing",
-                            f"Agent {result.current_agent.name} is still processing...",
-                            is_done=True,
-                        )
+                    self.printer.update_item(
+                        "agent_processing",
+                        f"Passing output of {result.last_agent.name} to orchestrator...",
+                        is_done=True,
+                    )
 
-                    # Add the response to conversation history
-                    conversation_history.append({"role": "assistant", "content": result.final_output})
-            
+                # Add the response to conversation history - convert to string to avoid JSON issues
+                if isinstance(result.final_output, dict):
+                    conversation_history.append({"role": "assistant", "content": json.dumps(result.final_output)})
+                else:
+                    try:
+                        # Try to convert to a simple string representation
+                        content = str(result.final_output)
+                        conversation_history.append({"role": "assistant", "content": content})
+                    except Exception as e:
+                        self.console.log(f"Error converting response to string: {e}")
+                        conversation_history.append({"role": "assistant", "content": "Response processed but not added to history due to serialization error"})
+
+                conversation_history.append({"role": "user", "content": f"Continue with the research given the output of {result.last_agent.name}"})
+                
             # Mark orchestration as complete
             self.printer.mark_item_done("orchestration")
 
@@ -175,20 +193,15 @@ class ResearchManager:
             summary = f"Report summary\n\n{report.short_summary}"
             self.printer.update_item("final_report", summary, is_done=True)
 
-            # Run a reflection agent to learn from this session
-            # await self._reflect_on_session(query, report, conversation_history)
-
-            self.printer.end()
-
-        # Print report and follow-up questions to the console
-        self.console.print("\n\n")
-        self.console.print(Panel("[bold blue]=====REPORT=====", expand=False))
-        self.console.print(Markdown(report.report))
-        
-        # Save console recording to HTML (now this happens after reflection)
-        self._save_session_to_html(query)
-        
-        return report
+            # Print report and follow-up questions to the console
+            self.console.print("\n\n")
+            self.console.print(Panel("[bold blue]=====REPORT=====", expand=False))
+            self.console.print(Markdown(report.report))
+            
+            # Save console recording to HTML (now this happens after reflection)
+            self._save_session_to_html(query)
+            
+            return report
     
     def _save_session_to_html(self, query: str):
         """Save the current console recording to an HTML file."""

@@ -6,6 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ChevronsUpDown, SendHorizontal, LoaderCircle } from "lucide-react";
 import MarkdownReport from './MarkdownReport';
 import { saveReport } from '@/utils/storage';
@@ -41,9 +49,12 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
   const wsRef = useRef<WebSocket | null>(null);
   
   // Add new state for clarification UI
-  const [showClarification, setShowClarification] = useState<boolean>(false);
+  const [showClarificationDialog, setShowClarificationDialog] = useState<boolean>(false);
   const [clarificationQuestion, setClarificationQuestion] = useState<string>('');
   const [clarificationResponse, setClarificationResponse] = useState<string>('');
+  
+  // Add a new state to track when a clarification is pending
+  const [isPendingClarification, setIsPendingClarification] = useState<boolean>(false);
   
   // Initialize from history if provided
   useEffect(() => {
@@ -102,6 +113,31 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
             if (data.type === 'clarification_request') {
               // Handle clarification request
               handleClarificationRequest(data.message || 'Can you provide more information?');
+            } else if (data.type === 'progress' && data.item === 'clarification') {
+              // Handle clarification-related progress updates
+              setProgress(prev => {
+                const existingItemIndex = prev.findIndex(p => p.item === 'clarification');
+                if (existingItemIndex >= 0) {
+                  const updated = [...prev];
+                  updated[existingItemIndex] = { 
+                    message: data.message!,
+                    done: data.is_done || false,
+                    item: 'clarification'
+                  };
+                  return updated;
+                } else {
+                  return [...prev, { 
+                    message: data.message!,
+                    done: data.is_done || false,
+                    item: 'clarification'
+                  }];
+                }
+              });
+              
+              // Update the pending clarification state based on the message
+              if (data.is_done && data.message?.includes('Received user clarification')) {
+                setIsPendingClarification(false);
+              }
             } else {
               updateProgress(data);
             }
@@ -126,15 +162,14 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
   };
   
   const handleClarificationRequest = (question: string) => {
-    // Show the clarification UI
+    // Show the clarification dialog
     setClarificationQuestion(question);
-    setShowClarification(true);
-    // Automatically expand the progress panel to show the clarification request
-    setIsProgressOpen(true);
+    setShowClarificationDialog(true);
+    setIsPendingClarification(true);
     
     // Add to progress
     setProgress(prev => [...prev, { 
-      message: `Agent is asking: ${question}`,
+      message: `Agent is asking for clarification...`,
       done: false,
       item: 'clarification_request'
     }]);
@@ -159,8 +194,9 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
       }]);
       
       // Reset clarification UI
-      setShowClarification(false);
+      setShowClarificationDialog(false);
       setClarificationResponse('');
+      setIsPendingClarification(false);
     }
   };
   
@@ -258,6 +294,21 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
         </div>
       </div>
       
+      {isPendingClarification && (
+        <div className="bg-amber-50 border-l-4 border-amber-400 p-4 mb-4 rounded-r">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <span className="text-amber-400">⚠️</span>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-amber-700">
+                The research agent needs your input to continue. Please check the clarification dialog.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {status === 'processing' && (
         <Card>
             <Collapsible open={isProgressOpen} onOpenChange={setIsProgressOpen}>
@@ -285,38 +336,51 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
                       </div>
                     </div>
                   ))}
-                  
-                  {/* Clarification input section */}
-                  {showClarification && (
-                    <div className="mt-4 border-t pt-4">
-                      <div className="mb-2 font-medium text-primary">
-                        {clarificationQuestion}
-                      </div>
-                      <div className="flex space-x-2">
-                        <Input
-                          type="text"
-                          value={clarificationResponse}
-                          onChange={(e) => setClarificationResponse(e.target.value)}
-                          onKeyDown={handleClarificationKeyPress}
-                          placeholder="Type your response..."
-                          className="flex-1"
-                        />
-                        <Button 
-                          onClick={submitClarification}
-                          disabled={!clarificationResponse.trim()}
-                          size="sm"
-                        >
-                          Send
-                        </Button>
-                      </div>
-                    </div>
-                  )}
                 </ScrollArea>
               </CardContent>
             </CollapsibleContent>
           </Collapsible>
         </Card>
       )}
+      
+      {/* Clarification Dialog */}
+      <Dialog open={showClarificationDialog} onOpenChange={(open) => {
+        // Prevent users from manually closing the dialog - they must respond
+        if (!open && showClarificationDialog) {
+          return;
+        }
+        setShowClarificationDialog(open);
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">Clarification Needed</DialogTitle>
+            <DialogDescription>
+              The research agent needs additional information to continue.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="p-4 my-3 bg-muted rounded-lg text-sm whitespace-pre-line">
+            {clarificationQuestion}
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <Input
+              type="text"
+              value={clarificationResponse}
+              onChange={(e) => setClarificationResponse(e.target.value)}
+              onKeyDown={handleClarificationKeyPress}
+              placeholder="Type your response..."
+              className="flex-1"
+              autoFocus
+            />
+            <Button 
+              onClick={submitClarification}
+              disabled={!clarificationResponse.trim()}
+              className="sm:w-auto w-full"
+            >
+              Submit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       
       {report && <MarkdownReport markdown={report} />}
     </div>
