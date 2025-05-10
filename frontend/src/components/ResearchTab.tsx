@@ -37,6 +37,7 @@ interface WebSocketMessage {
   message?: string;
   is_done?: boolean;
   report?: string;
+  result?: { report: string };
 }
 
 const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
@@ -229,24 +230,30 @@ const ResearchTab: React.FC<ResearchTabProps> = ({ tabId, initialReport }) => {
         }]);
       }
     }
-    else if (data.type === 'complete' && data.report) {
+    else if (data.type === 'complete') {
       setStatus('complete');
-      setReport(data.report);
-      
-      // Extract a title from the report (first h1 title)
-      const titleMatch = data.report.match(/^# (.+)$/m);
-      const extractedTitle = titleMatch ? titleMatch[1] : `Research ${new Date().toLocaleString()}`;
-      setTitle(extractedTitle);
-      
-      // Save to history
-      const historyItem: ReportHistory = {
-        id: `${Date.now()}`,
-        title: extractedTitle,
-        query: query,
-        report: data.report,
-        timestamp: Date.now()
-      };
-      saveReport(historyItem);
+      // Check if report is in result object
+      const reportText = data.result?.report || data.report;
+      if (reportText) {
+        setReport(reportText);
+        
+        // Extract a title from the report (first h1 title)
+        const titleMatch = reportText.match(/^# (.+)$/m);
+        const extractedTitle = titleMatch ? titleMatch[1] : `Research ${new Date().toLocaleString()}`;
+        setTitle(extractedTitle);
+        
+        // Save to history
+        const historyItem: ReportHistory = {
+          id: `${Date.now()}`,
+          title: extractedTitle,
+          query: query,
+          report: reportText,
+          timestamp: Date.now()
+        };
+        saveReport(historyItem);
+      } else {
+        console.error('No report found in data:', data);
+      }
     }
   };
 

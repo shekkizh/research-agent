@@ -172,20 +172,20 @@ class ResearchManager:
                         is_done=True,
                     )
 
-                # Add the response to conversation history - convert to string to avoid JSON issues
-                if isinstance(result.final_output, dict):
-                    conversation_history.append({"role": "assistant", "content": json.dumps(result.final_output)})
-                else:
-                    try:
-                        # Try to convert to a simple string representation
-                        content = str(result.final_output)
-                        conversation_history.append({"role": "assistant", "content": content})
-                    except Exception as e:
-                        self.console.log(f"Error converting response to string: {e}")
-                        conversation_history.append({"role": "assistant", "content": "Response processed but not added to history due to serialization error"})
+                    # Add the response to conversation history - convert to string to avoid JSON issues
+                    if isinstance(result.final_output, dict):
+                        conversation_history.append({"role": "assistant", "content": json.dumps(result.final_output)})
+                    else:
+                        try:
+                            # Try to convert to a simple string representation
+                            content = str(result.final_output)
+                            conversation_history.append({"role": "assistant", "content": content})
+                        except Exception as e:
+                            self.console.log(f"Error converting response to string: {e}")
+                            conversation_history.append({"role": "assistant", "content": "Response processed but not added to history due to serialization error"})
 
-                conversation_history.append({"role": "user", "content": f"Continue with the research given the output of {result.last_agent.name}"})
-                
+                    conversation_history.append({"role": "user", "content": f"Continue with the research given the output of {result.last_agent.name}"})
+                    
             # Mark orchestration as complete
             self.printer.mark_item_done("orchestration")
 
@@ -208,40 +208,8 @@ class ResearchManager:
         os.makedirs("output_logs", exist_ok=True)
         html_filename = f"output_logs/research_session_{self.timestamp}.html"
         
-        # Create an HTML file with the recorded content
-        with open(html_filename, "w", encoding="utf-8") as html_file:
-            html_content = self.console.export_html(
-                theme="default",
-                clear=False,
-                code_format=True,
-                inline_styles=True
-            )
-            # Add some basic styling and title based on the query
-            styled_html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Research: {query[:50]}...</title>
-    <style>
-        body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        h1 {{ color: #333; }}
-        .timestamp {{ color: #666; font-size: 0.9em; margin-bottom: 20px; }}
-        .console-output {{ background-color: #f5f5f5; border-radius: 5px; padding: 10px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Research Session: {query}</h1>
-        <div class="timestamp">Timestamp: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>
-        <div class="console-output">
-            {html_content}
-        </div>
-    </div>
-</body>
-</html>"""
-            html_file.write(styled_html)
+        # Save the console recording to HTML using the correct method
+        self.console.save_html(html_filename)
             
         self.console.print(f"[green]Session log saved to: [bold]{html_filename}[/bold][/green]")
         

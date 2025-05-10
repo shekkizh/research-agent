@@ -117,21 +117,27 @@ async def broadcast_completion(session_id: str, result: Any):
             # For report-like objects
             if hasattr(result, 'report'):
                 result_data = {'report': result.report}
+                print(f"Sending report data: {result.report[:100]}...")  # Log the first 100 chars of report
             # For objects with dictionary conversion
             elif hasattr(result, 'to_dict'):
                 result_data = result.to_dict()
+                print(f"Sending dict data: {result_data}")
             # For objects with dict representation
             elif hasattr(result, '__dict__'):
                 result_data = result.__dict__
+                print(f"Sending __dict__ data: {result_data}")
             # Fallback to string representation
             else:
                 result_data = {'report': str(result)}
+                print(f"Sending string data: {result_data}")
                 
             data = {
                 "session_id": session_id,
                 "type": "complete",
                 "result": result_data
             }
+            
+            print(f"Full completion data being sent: {data}")
             
             for connection in active_connections[session_id]:
                 try:
@@ -155,6 +161,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         # If there's already a result for this session, send it immediately
         if session_id in research_results:
             result = research_results[session_id]
+            print(f"Found existing result for session {session_id}: {type(result)}")
             
             # Skip if it's an AgentResponse with clarification request
             from backend.agents import AgentResponse
@@ -162,18 +169,24 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 # Apply the same conversion logic as in broadcast_completion
                 if hasattr(result, 'report'):
                     result_data = {'report': result.report}
+                    print(f"Sending stored report data: {result.report[:100]}...")
                 elif hasattr(result, 'to_dict'):
                     result_data = result.to_dict()
+                    print(f"Sending stored dict data: {result_data}")
                 elif hasattr(result, '__dict__'):
                     result_data = result.__dict__
+                    print(f"Sending stored __dict__ data: {result_data}")
                 else:
                     result_data = {'report': str(result)}
-                    
-                await websocket.send_text(json.dumps({
+                    print(f"Sending stored string data: {result_data}")
+                
+                data = {
                     "session_id": session_id,
                     "type": "complete",
                     "result": result_data
-                }))
+                }
+                print(f"Full stored completion data being sent: {data}")
+                await websocket.send_text(json.dumps(data))
         
         # Keep the connection open and listen for any messages
         while True:

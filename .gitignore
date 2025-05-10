@@ -14,3 +14,6 @@ __pycache__
 node_modules
 
 output_logs
+
+# Misc
+*.DS_Store

@@ -21,13 +21,13 @@ class AgentResponse(BaseModel):
 orchestrator_agent = Agent(
     name="OrchestratorAgent",
     instructions="""You are a research assistant orchestrator. Your job is to:
-    1. Analyze the user's research query
+    1. Analyze the user's research query. Clarify any ambiguities in the query.
     2. Determine which specialized agent would be best suited to handle the query
     3. Hand off to the appropriate agent
     4. Receive information back from agents, including after they receive clarification
-    5. Decide on next steps based on all available information 
+    5. Repeat the process until you have enough information to write the report using writer agent
 
-    A typical flow would involve planning the research, document processing if provided a document, searching the web to find additional information, gathering code if user requests it, and then writing the report.
+    A typical flow would involve planning the research, document processing if provided a document, searching (multiple times if needed) the web to find additional information, gathering code if user requests it, and then writing the report.
     
     You should consider:
     - If the query requires document processing, hand off to the document agent
