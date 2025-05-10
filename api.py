@@ -97,7 +97,7 @@ async def broadcast_completion(session_id: str, result: Any):
         data = {
             "session_id": session_id,
             "type": "complete",
-            "report": result.markdown_report if hasattr(result, 'markdown_report') else str(result)
+            "report": result.report if hasattr(result, 'report') else str(result)
         }
         for connection in active_connections[session_id]:
             try:
@@ -122,7 +122,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             await websocket.send_text(json.dumps({
                 "session_id": session_id,
                 "type": "complete",
-                "report": result.markdown_report if hasattr(result, 'markdown_report') else str(result)
+                "report": result.report if hasattr(result, 'report') else str(result)
             }))
         
         # Keep the connection open and listen for any messages

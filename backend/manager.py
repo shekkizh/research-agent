@@ -1,32 +1,31 @@
 from __future__ import annotations
 
-import asyncio
 import time
-import uuid
+import os
+import json
+from datetime import datetime
 from typing import Callable, Optional, Any, List, Dict
 
 from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
 from openai.types.responses import ResponseContentPartDoneEvent, ResponseTextDeltaEvent
 
-from agents import Runner, custom_span, gen_trace_id, trace, Agent, RawResponsesStreamEvent, TResponseInputItem, InputGuardrail
+from agents import Runner, custom_span, gen_trace_id, trace, RawResponsesStreamEvent, TResponseInputItem
 
 from backend.agents.planner_agent import planner_agent
 from backend.agents.search_agent import search_agent
 from backend.agents.writer_agent import writer_agent, ReportData
 from backend.agents.document_agent import document_agent
 from backend.agents.code_agent import code_agent
-from backend.agents.reflection_agent import reflection_agent
+from backend.agents.reflection_agent import reflection_agent, ReflectionSummary
 from backend.agents.orchestrator_agent import orchestrator_agent
-# Comment out the guardrails import
-# from backend.agents.guardrails import query_validation_guardrail
+from backend.agents.base_agent import BaseAgentResponse, ClarificationRequest
 from backend.printer import Printer
-
-# Remove the direct import
-# from api import request_clarification
 
 class ResearchManager:
     def __init__(self, printer_callback: Optional[Callable[[str, str, bool], Any]] = None):
-        self.console = Console()
+        self.console = Console(record=True)  # Enable recording by default
         self.printer = Printer(self.console, callback=printer_callback)
         
         # Configure agent handoffs
@@ -34,6 +33,8 @@ class ResearchManager:
         
         # Store the current session ID
         self.session_id = None
+        # Store timestamp for the session
+        self.timestamp = None
 
     def _configure_agent_system(self):
         """Configure the agent system with proper handoffs."""
@@ -43,29 +44,26 @@ class ResearchManager:
             search_agent,
             writer_agent,
             document_agent,
-            code_agent,
-            reflection_agent
+            code_agent
         ]
         
-        # Comment out guardrail configuration
-        # Set up validation guardrail for the orchestrator
-        # orchestrator_agent.input_guardrails = [
-        #     InputGuardrail(guardrail_function=query_validation_guardrail)
-        # ]
-        
-        # Reset any existing guardrails
-        orchestrator_agent.input_guardrails = []
-        
-        # Allow the writer agent to request more specific searches
-        writer_agent.handoffs = [search_agent, document_agent]
-        
-        # Allow planner to request specific searches
-        planner_agent.handoffs = [search_agent]
+        # we need orchestrator to handoff to all agents and each of the sub-agents should coordinate via orchestrator (handoff back to orchestrator)
+        # this way we can track the conversation history and the flow of the research
+        planner_agent.handoffs = [orchestrator_agent]
+        search_agent.handoffs = [orchestrator_agent]
+        writer_agent.handoffs = [orchestrator_agent]
+        document_agent.handoffs = [orchestrator_agent]
+        code_agent.handoffs = [orchestrator_agent]
 
     async def run(self, query: str, session_id: Optional[str] = None) -> ReportData:
         self.session_id = session_id  # Store the session ID for this run
         conversation_id = gen_trace_id()
-        with trace("Research trace", trace_id=conversation_id):
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Reset the console recording
+        self.console.record = True
+        
+        with trace(f"Research {session_id}", trace_id=conversation_id):
             self.printer.update_item(
                 "trace_id",
                 f"View trace: https://platform.openai.com/traces/trace?trace_id={conversation_id}",
@@ -92,56 +90,44 @@ class ResearchManager:
             report = None
             while report is None:
                 # Stream the agent process
-                result = Runner.run_streamed(
+                result = await Runner.run(
                     current_agent,
                     input=conversation_history,
                 )
                 
-                # Process the streamed responses
-                last_update = time.time()
-                agent_response = ""
-                async for event in result.stream_events():
-                    if time.time() - last_update > 5:
-                        self.printer.update_item("orchestration", "Processing...")
-                        last_update = time.time()
-                        
-                    if not isinstance(event, RawResponsesStreamEvent):
-                        continue
-                        
-                    data = event.data
-                    if isinstance(data, ResponseTextDeltaEvent) and data.delta:
-                        if hasattr(data.delta, 'content') and data.delta.content:
-                            agent_response += data.delta.content
-                            self.printer.update_item(
-                                "stream_progress",
-                                f"Agent working... (latest: {data.delta.content[:20]}...)",
-                                hide_checkmark=True,
-                            )
-                    elif isinstance(data, ResponseContentPartDoneEvent):
-                        self.printer.update_item(
-                            "current_agent",
-                            f"Currently using: {result.current_agent.name}",
-                            is_done=True,
-                            hide_checkmark=True,
-                        )
+                
+                # Log full agent response to console for debugging
+                self.console.print(f"\n[dim blue]===== {current_agent.name} RESPONSE =====\n{result}\n==================================[/dim blue]")
                 
                 # Check if the agent is asking for clarification
-                if self._is_asking_clarification(agent_response) and result.current_agent.name != "ReflectionAgent":
-                    # Display the agent's request
-                    self.printer.update_item(
-                        "clarification",
-                        f"Agent is asking for clarification: {agent_response}",
-                        is_done=True,
-                        hide_checkmark=True,
-                    )
+                if hasattr(result.final_output, 'clarification_request') and hasattr(result.final_output.clarification_request, 'questions'):
+                    try:
+                        agent_response = result.final_output_as(BaseAgentResponse)
+                        questions = agent_response.clarification_request.questions
+                        context = agent_response.clarification_request.context
+                        
+                        if questions:
+                            # Format the questions and context for UI display
+                            formatted_parts = []
+                            if context:
+                                formatted_parts.append(f"Context: {context}")
+ 
+                            formatted_parts.append("Questions:")
+                            for i, question in enumerate(questions, 1):
+                                formatted_parts.append(f"{i}. {question}")
+                            
+                            formatted_question = "\n".join(formatted_parts)
+                    except Exception as e:
+                        self.console.log(f"Error parsing agent response: {e}")
+                        formatted_question = str(agent_response) # fallback to string representation of agent response
                     
                     # Get user input via WebSocket if session_id is available, otherwise fallback to console
                     if self.session_id:
                         # Import here to avoid circular imports
                         from api import request_clarification
-                        user_input = await request_clarification(self.session_id, agent_response)
+                        user_input = await request_clarification(self.session_id, formatted_question)
                     else:
-                        user_input = input("\nPlease provide clarification: ")
+                        user_input = input("\nProvide clarification: ")
                     
                     self.printer.update_item(
                         "user_response",
@@ -153,12 +139,10 @@ class ResearchManager:
                     # Add to conversation history
                     conversation_history.append({"role": "assistant", "content": agent_response})
                     conversation_history.append({"role": "user", "content": user_input})
-                    
-                    # Continue with the same agent
-                    current_agent = result.current_agent
+
                 else:
                     # Check if we've completed the task or need to continue with handoff
-                    if hasattr(result.final_output, 'markdown_report'):
+                    if hasattr(result.final_output, 'report'):
                         # If the output is already a report
                         report = result.final_output_as(ReportData)
                         self.printer.update_item(
@@ -169,74 +153,84 @@ class ResearchManager:
                     elif result.current_agent != current_agent:
                         # If we have a handoff, update the current agent
                         self.printer.update_item(
-                            "handoff",
-                            f"Handing off from {current_agent.name} to {result.current_agent.name}",
+                            "clarification_requested",
+                            f"Clarification requested from {result.current_agent.name}",
                             is_done=True,
                         )
                         current_agent = result.current_agent
-                        
-                        # Add the response to conversation history
-                        conversation_history.append({"role": "assistant", "content": agent_response})
                     else:
-                        # We need to synthesize a report from results
-                        self.printer.update_item("synthesizing", "Synthesizing final report...")
-                        
-                        # Add the final response to conversation history
-                        conversation_history.append({"role": "assistant", "content": agent_response})
-                        
-                        synthesize_result = await Runner.run(
-                            writer_agent,
-                            f"Original query: {query}\nResearch results: {str(result.final_output)}",
+                        self.printer.update_item(
+                            "agent processing",
+                            f"Agent {result.current_agent.name} is still processing...",
+                            is_done=True,
                         )
-                        report = synthesize_result.final_output_as(ReportData)
-                        self.printer.mark_item_done("synthesizing")
+
+                    # Add the response to conversation history
+                    conversation_history.append({"role": "assistant", "content": result.final_output})
             
             # Mark orchestration as complete
             self.printer.mark_item_done("orchestration")
 
             # Print the final report summary
-            final_report = f"Report summary\n\n{report.short_summary}"
-            self.printer.update_item("final_report", final_report, is_done=True)
-            
-            # Add follow-up questions as separate items
-            for i, question in enumerate(report.follow_up_questions):
-                self.printer.update_item(
-                    f"follow_up_{i+1}",
-                    f"Follow-up question: {question}",
-                    is_done=True,
-                    hide_checkmark=True,
-                )
+            summary = f"Report summary\n\n{report.short_summary}"
+            self.printer.update_item("final_report", summary, is_done=True)
+
+            # Run a reflection agent to learn from this session
+            # await self._reflect_on_session(query, report, conversation_history)
 
             self.printer.end()
 
-        print("\n\n=====REPORT=====\n\n")
-        print(f"Report: {report.markdown_report}")
-        print("\n\n=====FOLLOW UP QUESTIONS=====\n\n")
-        follow_up_questions = "\n".join(report.follow_up_questions)
-        print(f"Follow up questions: {follow_up_questions}")
+        # Print report and follow-up questions to the console
+        self.console.print("\n\n")
+        self.console.print(Panel("[bold blue]=====REPORT=====", expand=False))
+        self.console.print(Markdown(report.report))
         
-        # Run a reflection agent to learn from this session
-        await self._reflect_on_session(query, report, conversation_history)
+        # Save console recording to HTML (now this happens after reflection)
+        self._save_session_to_html(query)
         
         return report
     
-    def _is_asking_clarification(self, response: str) -> bool:
-        """Detect if the agent is asking for clarification from the user."""
-        # Simple heuristic based on the presence of question marks and clarification keywords
-        clarification_indicators = [
-            "?",
-            "could you clarify",
-            "can you explain",
-            "please provide more information",
-            "need more details",
-            "can you specify",
-            "could you elaborate",
-            "need clarification"
-        ]
+    def _save_session_to_html(self, query: str):
+        """Save the current console recording to an HTML file."""
+        os.makedirs("output_logs", exist_ok=True)
+        html_filename = f"output_logs/research_session_{self.timestamp}.html"
         
-        lower_response = response.lower()
-        # Check if the response contains any clarification indicators
-        return any(indicator in lower_response for indicator in clarification_indicators)
+        # Create an HTML file with the recorded content
+        with open(html_filename, "w", encoding="utf-8") as html_file:
+            html_content = self.console.export_html(
+                theme="default",
+                clear=False,
+                code_format=True,
+                inline_styles=True
+            )
+            # Add some basic styling and title based on the query
+            styled_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Research: {query[:50]}...</title>
+    <style>
+        body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        h1 {{ color: #333; }}
+        .timestamp {{ color: #666; font-size: 0.9em; margin-bottom: 20px; }}
+        .console-output {{ background-color: #f5f5f5; border-radius: 5px; padding: 10px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Research Session: {query}</h1>
+        <div class="timestamp">Timestamp: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>
+        <div class="console-output">
+            {html_content}
+        </div>
+    </div>
+</body>
+</html>"""
+            html_file.write(styled_html)
+            
+        self.console.print(f"[green]Session log saved to: [bold]{html_filename}[/bold][/green]")
         
     async def _reflect_on_session(self, query: str, report: ReportData, conversation_history: List[TResponseInputItem]):
         """Run a reflection on the research session to improve future interactions."""
@@ -255,11 +249,59 @@ class ResearchManager:
                     reflection_agent,
                     f"Original query: {query}\nReport summary: {report.short_summary}\nFollow-up questions: {report.follow_up_questions}\nConversation history: {conversation_str}",
                 )
+                # Log the reflection results for future reference
+                reflection_summary = result.final_output_as(ReflectionSummary)
                 
+                # Print the reflection data to the main console using Rich formatting
+                self.printer.update_item("reflection", "Reflecting on research session...")
+                self.printer.update_item("reflection_result", "Reflection complete - Will be included in session log", is_done=True)
+                self.console.print(Panel("[bold blue]=====REFLECTION=====", expand=False))
+                self.console.print(f"[bold blue]=== REFLECTION LOG: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===[/bold blue]")
+                self.console.print(f"[bold]Original Query:[/bold] {query}")
+                self.console.print("\n[bold yellow]User Preferences:[/bold yellow]")
+                self.console.print("[yellow]" + "-" * 40 + "[/yellow]")
+                
+                # Add each user preference with rich formatting
+                for pref in reflection_summary.user_preferences:
+                    self.console.print(f"[cyan]Topic:[/cyan] {pref.topic}")
+                    self.console.print(f"[cyan]Interest Level:[/cyan] {pref.interest_level}")
+                    self.console.print(f"[cyan]Relevance:[/cyan] {pref.relevance}")
+                    self.console.print("[yellow]" + "-" * 40 + "[/yellow]")
+                
+                # Add research style and recommendations with rich formatting
+                self.console.print(f"\n[bold green]Research Style:[/bold green]")
+                self.console.print(reflection_summary.research_style)
+                
+                self.console.print("\n[bold magenta]Recommendations:[/bold magenta]")
+                for i, rec in enumerate(reflection_summary.recommendations, 1):
+                    self.console.print(f"[magenta]{i}.[/magenta] {rec}")
+                
+                # Also save a standalone text version of the reflection
+                os.makedirs("output_logs", exist_ok=True)
+                text_filename = f"output_logs/reflection_{self.timestamp}.txt"
+                with open(text_filename, "w") as f:
+                    f.write(f"=== REFLECTION LOG: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+                    f.write(f"Original Query: {query}\n\n")
+                    f.write("User Preferences:\n")
+                    f.write("-" * 40 + "\n")
+                    
+                    for pref in reflection_summary.user_preferences:
+                        f.write(f"Topic: {pref.topic}\n")
+                        f.write(f"Interest Level: {pref.interest_level}\n")
+                        f.write(f"Relevance: {pref.relevance}\n")
+                        f.write("-" * 40 + "\n")
+                    
+                    f.write(f"\nResearch Style:\n{reflection_summary.research_style}\n\n")
+                    f.write("Recommendations:\n")
+                    for i, rec in enumerate(reflection_summary.recommendations, 1):
+                        f.write(f"{i}. {rec}\n")
+                
+                # Print completion message to console
                 self.printer.update_item(
                     "reflection_result",
-                    "Reflection complete - User preferences and recommendations updated",
+                    "Reflection complete - Will be included in session log",
                     is_done=True,
+                    hide_checkmark=True,
                 )
                 
                 # In a real implementation, we would store these results in a database

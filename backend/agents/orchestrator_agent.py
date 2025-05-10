@@ -1,5 +1,22 @@
 from agents import Agent
 
+from pydantic import BaseModel
+from typing import List, Optional
+
+class ClarificationRequest(BaseModel):
+    """A request for clarification from the user before proceeding."""
+    questions: List[str]
+    """The questions to ask the user."""
+    
+    context: str
+    """Context explaining why clarification is needed."""
+
+
+class AgentResponse(BaseModel):
+    """Agent response with support for clarification."""
+    clarification_request: Optional[ClarificationRequest] = None
+    """Optional clarification request if the agent needs more information."""
+
 # Define the orchestrator agent that will delegate to specialized agents
 orchestrator_agent = Agent(
     name="OrchestratorAgent",
@@ -7,9 +24,10 @@ orchestrator_agent = Agent(
     1. Analyze the user's research query
     2. Determine which specialized agent would be best suited to handle the query
     3. Hand off to the appropriate agent
+    4. Receive information back from agents, including after they receive clarification
+    5. Decide on next steps based on all available information 
 
-    If the query is unclear or lacks sufficient detail, DON'T hesitate to ask clarifying questions.
-    Always ensure you have enough information before proceeding with handoff.
+    A typical flow would involve planning the research, document processing if provided a document, searching the web to find additional information, gathering code if user requests it, and then writing the report.
     
     You should consider:
     - If the query requires document processing, hand off to the document agent
@@ -19,6 +37,7 @@ orchestrator_agent = Agent(
     
     Always be concise and efficient in your delegation.
     """,
-    model="gpt-4.1-mini",
-    # Handoffs will be attached in manager.py after all agents are defined
+    model="gpt-4.1",
+    handoff_description="Orchestration agent that coordinate the work of the other agents, triages inputs, and passes/answers clarifying questions appropriately.",
+    output_type=AgentResponse,
 ) 
